@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pulse Tap - Precision Game</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #0f172a;
+            font-family: 'Inter', sans-serif;
+            user-select: none;
+            touch-action: manipulation;
+        }
+        canvas {
+            display: block;
+        }
+        .ui-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            padding: 2rem;
+            color: white;
+        }
+        .shake {
+            animation: shake 0.5s cubic-bezier(.36,.07,.19,.97) both;
+        }
+        @keyframes shake {
+            10%, 90% { transform: translate3d(-1px, 0, 0); }
+            20%, 80% { transform: translate3d(2px, 0, 0); }
+            30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+            40%, 60% { transform: translate3d(4px, 0, 0); }
+        }
+        .pulse-text {
+            animation: pulse-text 1s infinite;
+        }
+        @keyframes pulse-text {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.05); }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container" class="relative w-full h-screen overflow-hidden">
+        <canvas id="gameCanvas"></canvas>
+        
+        <div class="ui-overlay">
+            <div class="text-center mt-8">
+                <div class="text-6xl font-black tracking-tighter transition-all duration-100" id="score">0</div>
+                <div class="text-slate-400 text-sm uppercase tracking-widest font-bold">Current Score</div>
+            </div>
+
+            <div id="start-screen" class="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/60 pointer-events-auto backdrop-blur-sm">
+                <h1 class="text-5xl font-black mb-2 text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">PULSE TAP</h1>
+                <p class="text-slate-300 mb-8 px-8 text-center max-w-xs">Tap when the expanding pulse hits the outer ring.</p>
+                <button id="start-btn" class="px-10 py-4 bg-cyan-500 hover:bg-cyan-400 text-slate-900 font-bold rounded-full transition-transform active:scale-95 cursor-pointer text-xl shadow-lg shadow-cyan-500/20">
+                    TAP TO START
+                </button>
+                <div class="mt-8 text-slate-500 text-sm">Best: <span id="best-score">0</span></div>
+            </div>
+
+            <div id="game-ui" class="hidden mb-12 flex flex-col items-center">
+                <p class="text-slate-500 text-xs uppercase tracking-[0.2em] pulse-text">Tap anywhere to pulse</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const startScreen = document.getElementById('start-screen');
+        const startBtn = document.getElementById('start-btn');
+        const bestScoreEl = document.getElementById('best-score');
+        const gameContainer = document.getElementById('game-container');
+
+        let width, height;
+        let score = 0;
+        let bestScore = localStorage.getItem('pulseTapBest') || 0;
+        let gameState = 'START'; // START, PLAYING, GAMEOVER
+        
+        // Game Constants
+        const TARGET_RADIUS = 120;
+        const TOLERANCE = 15;
+        const INITIAL_SPEED = 2;
+        const SPEED_INCREMENT = 0.15;
+        
+        // Game Variables
+        let pulseRadius = 0;
+        let pulseSpeed = INITIAL_SPEED;
+        let particles = [];
+        let targetBgColor = { r: 15, g: 23, b: 42 };
+        let currentBgColor = { r: 15, g: 23, b: 42 };
+        let ringColor = 'rgba(255, 255, 255, 0.2)';
+        let flashOpacity = 0;
+        let ringScale = 1;
+
+        // Audio System
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playSound(freq, type, duration) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+            osc.start();
+            osc.stop(audioCtx.currentTime + duration);
+        }
+
+        function playHitSound() {
+            playSound(440 + (score * 20), 'sine', 0.2);
+        }
+
+        function playFailSound() {
+            playSound(150, 'sawtooth', 0.5);
+        }
+
+        // Resize
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width * window.devicePixelRatio;
+            canvas.height = height * window.devicePixelRatio;
+            ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+            canvas.style.width = width + 'px';
+            canvas.style.height = height + 'px';
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+
+        // Particle System
+        class Particle {
+            constructor(x, y, color) {
+                this.x = x;
+                this.y = y;
+                this.color = color;
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 4 + 2;
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+                this.life = 1;
+                this.decay = Math.random() * 0.02 + 0.02;
+                this.radius = Math.random() * 3 + 1;
+            }
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.life -= this.decay;
+            }
+            draw() {
+                ctx.globalAlpha = this.life;
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        function createParticles(x, y, color, count = 10) {
+            for (let i = 0; i < count; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        // Game Loop Logic
+        function update() {
+            if (gameState === 'PLAYING') {
+                pulseRadius += pulseSpeed;
+                
+                // Fail condition: circle grows too large
+                if (pulseRadius > TARGET_RADIUS + TOLERANCE + 20) {
+                    gameOver();
+                }
+
+                // Shift target color based on score
+                const colorShift = Math.min(score * 5, 100);
+                targetBgColor = { 
+                    r: 15 + (colorShift / 2), 
+                    g: 23, 
+                    b: 42 + colorShift 
+                };
+            } else {
+                targetBgColor = { r: 15, g: 23, b: 42 };
+            }
+
+            // Interpolate color
+            currentBgColor.r += (targetBgColor.r - currentBgColor.r) * 0.05;
+            currentBgColor.g += (targetBgColor.g - currentBgColor.g) * 0.05;
+            currentBgColor.b += (targetBgColor.b - currentBgColor.b) * 0.05;
+
+            // Update particles
+            particles = particles.filter(p => p.life > 0);
+            particles.forEach(p => p.update());
+
+            if (flashOpacity > 0) flashOpacity -= 0.05;
+        }
+
+        function draw() {
+            ctx.fillStyle = `rgb(${currentBgColor.r}, ${currentBgColor.g}, ${currentBgColor.b})`;
+            ctx.fillRect(0, 0, width, height);
+
+            if (flashOpacity > 0) {
+                ctx.fillStyle = `rgba(255, 255, 255, ${flashOpacity})`;
+                ctx.fillRect(0, 0, width, height);
+            }
+
+            const centerX = width / 2;
+            const centerY = height / 2;
+
+            // Draw Target Ring
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, TARGET_RADIUS * ringScale, 0, Math.PI * 2);
+            ctx.strokeStyle = ringColor;
+            ctx.lineWidth = 4;
+            ctx.stroke();
+
+            // Draw Pulsing Ring
+            if (gameState === 'PLAYING' || gameState === 'GAMEOVER') {
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, pulseRadius, 0, Math.PI * 2);
+                
+                const dist = Math.abs(pulseRadius - TARGET_RADIUS);
+                if (dist < TOLERANCE) {
+                    ctx.strokeStyle = '#22d3ee'; // Cyan-400
+                    ctx.lineWidth = 6;
+                } else {
+                    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+                    ctx.lineWidth = 2;
+                }
+                ctx.stroke();
+            }
+
+            // Smoothly return ring scale to 1
+            ringScale += (1 - ringScale) * 0.1;
+
+            // Draw Particles
+            particles.forEach(p => p.draw());
+        }
+
+        function loop() {
+            update();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        // Input Handlers
+        function handleAction() {
+            if (gameState === 'START') {
+                startGame();
+                return;
+            }
+
+            if (gameState === 'PLAYING') {
+                const dist = Math.abs(pulseRadius - TARGET_RADIUS);
+                
+                if (dist < TOLERANCE) {
+                    // SUCCESS
+                    score++;
+                    scoreEl.innerText = score;
+                    scoreEl.classList.add('scale-125');
+                    setTimeout(() => scoreEl.classList.remove('scale-125'), 100);
+                    
+                    ringScale = 1.1; // Visual pop
+                    pulseRadius = 0;
+                    pulseSpeed = INITIAL_SPEED + (score * SPEED_INCREMENT);
+                    
+                    flashOpacity = 0.15;
+                    playHitSound();
+                    
+                    // Add particles at the ring
+                    const centerX = width / 2;
+                    const centerY = height / 2;
+                    for (let i = 0; i < 12; i++) {
+                        const angle = (i / 12) * Math.PI * 2;
+                        createParticles(
+                            centerX + Math.cos(angle) * TARGET_RADIUS, 
+                            centerY + Math.sin(angle) * TARGET_RADIUS, 
+                            '#22d3ee', 
+                            2
+                        );
+                    }
+                } else {
+                    // FAIL
+                    gameOver();
+                }
+            }
+        }
+
+        function startGame() {
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            score = 0;
+            scoreEl.innerText = score;
+            pulseRadius = 0;
+            pulseSpeed = INITIAL_SPEED;
+            gameState = 'PLAYING';
+            startScreen.classList.add('hidden');
+            document.getElementById('game-ui').classList.remove('hidden');
+            bestScoreEl.innerText = bestScore;
+        }
+
+        function gameOver() {
+            gameState = 'GAMEOVER';
+            playFailSound();
+            gameContainer.classList.add('shake');
+            setTimeout(() => gameContainer.classList.remove('shake'), 500);
+
+            if (score > bestScore) {
+                bestScore = score;
+                localStorage.setItem('pulseTapBest', bestScore);
+            }
+
+            setTimeout(() => {
+                startScreen.classList.remove('hidden');
+                startBtn.innerText = 'TRY AGAIN';
+                document.getElementById('game-ui').classList.add('hidden');
+                gameState = 'START';
+                bestScoreEl.innerText = bestScore;
+            }, 1000);
+        }
+
+        window.addEventListener('mousedown', (e) => {
+            if (e.target.id === 'start-btn') return;
+            handleAction();
+        });
+
+        window.addEventListener('touchstart', (e) => {
+            if (e.target.id === 'start-btn') return;
+            e.preventDefault();
+            handleAction();
+        }, { passive: false });
+
+        startBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            startGame();
+        });
+
+        bestScoreEl.innerText = bestScore;
+        loop();
+    </script>
+</body>
+</html>
