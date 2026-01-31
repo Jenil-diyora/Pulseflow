@@ -1,43 +1,50 @@
 import React from 'react';
-import { Circle } from 'react-native-svg';
+import { G, Circle } from 'react-native-svg';
 
+/**
+ * Super lightweight ParticleSystem.
+ * Simplified for maximum compatibility and performance.
+ */
 const ParticleSystem = React.memo(({ particles }) => {
+  if (!particles || particles.length === 0) return null;
+
   return (
-    <>
-      {particles.map((particle) => (
+    <G>
+      {particles.map((p) => (
         <Circle
-          key={particle.id}
-          cx={particle.x}
-          cy={particle.y}
-          r={particle.radius}
-          fill={particle.color}
-          opacity={particle.life}
+          key={p.id}
+          cx={p.x}
+          cy={p.y}
+          r={p.radius}
+          fill={p.color}
+          opacity={p.life * 0.8}
         />
       ))}
-    </>
+    </G>
   );
 }, (prevProps, nextProps) => {
-  // Only re-render if particle count or reference changes
+  // Custom equality check: only re-render if particle count/IDs change meaningfully
+  // Actually, standard shallow comparison is fine if we update the array reference properly.
+  // But strictly, we want to update every frame the parent passes new props.
+  // Since we throttle in parent, React.memo mainly helps when parent re-renders for OTHER reasons (like score updates).
   return prevProps.particles === nextProps.particles;
 });
 
 export default ParticleSystem;
 
-// Particle class for game logic (matching code.html exactly)
 export class Particle {
   constructor(x, y, color) {
-    this.id = Math.random().toString(36).substr(2, 9);
+    this.id = Math.random().toString(36).substring(7);
     this.x = x;
     this.y = y;
     this.color = color;
-    // Random angle and speed matching code.html
     const angle = Math.random() * Math.PI * 2;
-    const speed = Math.random() * 4 + 2;
+    const speed = Math.random() * 2 + 1;
     this.vx = Math.cos(angle) * speed;
     this.vy = Math.sin(angle) * speed;
-    this.life = 1;
-    this.decay = Math.random() * 0.02 + 0.02;
-    this.radius = Math.random() * 3 + 1;
+    this.life = 1.0;
+    this.decay = 0.05 + Math.random() * 0.05;
+    this.radius = Math.random() * 2 + 0.5;
   }
 
   update() {

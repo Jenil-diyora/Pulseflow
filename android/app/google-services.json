@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "371341856606",
+    "project_id": "pulseflow-2a713",
+    "storage_bucket": "pulseflow-2a713.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:371341856606:android:8909cc946f150cc4d449cf",
+        "android_client_info": {
+          "package_name": "com.pulsetap.game"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "371341856606-9nto4kuis0s2dofskqgc5gcj1q00ijrv.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.pulsetap.game",
+            "certificate_hash": "6e21b5c3956a5dd486bfe6174569fde149ba8561"
+          }
+        },
+        {
+          "client_id": "371341856606-h74v8nulj0g3tblf0nm1h50lhljkhgc9.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCZvohbbe2fcsIqpoqHyrlckeaFYjQoRos"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "371341856606-h74v8nulj0g3tblf0nm1h50lhljkhgc9.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

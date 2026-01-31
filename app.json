@@ -2,6 +2,7 @@
   "expo": {
     "name": "Pulse Tap",
     "slug": "pulse-tap",
+    "scheme": "pulsetap",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -23,18 +24,24 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0f172a"
       },
-      "package": "com.pulsetap.game"
+      "package": "com.pulsetap.game",
+      "versionCode": 1,
+      "googleServicesFile": "./google-services.json",
+      "privacyPolicyUrl": "https://jenil-diyora.github.io/Pulseflow/privacy-policy.html"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-asset"
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "9f8cd7ac-1a5e-4b79-a15b-ae0df666b28c"
-      }
-    }
+      "expo-asset",
+      "@react-native-google-signin/google-signin",
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-1000922196781752~3093951942",
+          "iosAppId": "ca-app-pub-0000000000000000~0000000000"
+        }
+      ]
+    ]
   }
 }

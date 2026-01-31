@@ -1,163 +1,257 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Dimensions,
+  Animated,
+  StatusBar,
+  FlatList,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
 import ThemeBackground from '../components/ThemeBackground';
+import QuestService from '../services/QuestService';
 import StorageService from '../services/StorageService';
-import { QUESTS, getCategorizedQuests } from '../data/quests';
+import { useAuth } from '../services/AuthService';
+import { QUESTS } from '../data/quests';
+import { getThemeById } from '../data/themes';
+import { useAppTheme } from '../utils/themeHook';
 import * as GameIcons from '../components/GameIcons';
 
-const QuestsScreen = () => {
-  const [questProgress, setQuestProgress] = useState({});
-  const [stats, setStats] = useState(null);
-  const [selectedCategory, setSelectedCategory] = useState('All');
+const { width, height } = Dimensions.get('window');
 
-  useEffect(() => {
-    loadData();
-  }, []);
+const QuestCard = React.memo(({ quest, onClaim, isWeekly = false, theme }) => {
+  const IconComponent = GameIcons[quest.icon] || GameIcons.TargetIcon;
+  const progress = (quest.progress / quest.target) * 100;
+  const isCompleted = quest.completed;
+  const isClaimed = quest.claimed;
 
-  const loadData = async () => {
-    const progress = await StorageService.getQuestProgress();
-    const gameStats = await StorageService.getStats();
-    setQuestProgress(progress);
-    setStats(gameStats);
-  };
-
-  const categorizedQuests = getCategorizedQuests();
-  const categories = ['All', ...Object.keys(categorizedQuests)];
-
-  const getFilteredQuests = () => {
-    if (selectedCategory === 'All') {
-      return QUESTS;
-    }
-    return categorizedQuests[selectedCategory] || [];
-  };
-
-  const isQuestCompleted = (questId) => {
-    return questProgress[questId]?.completed || false;
-  };
-
-  const getQuestProgress = (quest) => {
-    if (!stats) return 0;
-
-    switch (quest.type) {
-      case 'score':
-        return Math.min((stats.averageScore / quest.target) * 100, 100);
-      case 'streak':
-        return Math.min((stats.bestStreak / quest.target) * 100, 100);
-      case 'games_played':
-        return Math.min((stats.totalGames / quest.target) * 100, 100);
-      default:
-        return 0;
-    }
-  };
+  const accentColor = isWeekly ? '#a855f7' : theme.primary;
 
   return (
-    <ThemeBackground>
-      <View style={styles.container}>
-        <Text style={styles.title}>QUESTS & CHALLENGES</Text>
+    <View style={[styles.questCard, isCompleted && !isClaimed && { borderColor: `${accentColor}40` }]}>
+      <LinearGradient
+        colors={
+          isClaimed
+            ? ['rgba(74, 222, 128, 0.05)', 'rgba(74, 222, 128, 0.01)']
+            : isCompleted
+              ? [`${accentColor}15`, `${accentColor}05`]
+              : [`${theme.text}08`, `${theme.text}02`]
+        }
+        style={styles.questInner}
+      >
+        <View style={styles.questTop}>
+          <View style={[styles.iconBox, isCompleted && { backgroundColor: `${accentColor}15` }]}>
+            <IconComponent
+              size={24}
+              color={isClaimed ? '#4ade80' : isCompleted ? accentColor : theme.subText}
+            />
+          </View>
 
-        {/* Category Filter */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.categoryScroll}
-          contentContainerStyle={styles.categoryContainer}
-        >
-          {categories.map(category => (
-            <TouchableOpacity
-              key={category}
-              onPress={() => setSelectedCategory(category)}
-              style={[
-                styles.categoryButton,
-                selectedCategory === category && styles.categoryButtonActive,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.categoryText,
-                  selectedCategory === category && styles.categoryTextActive,
-                ]}
-              >
-                {category}
+          <View style={styles.infoBox}>
+            <View style={styles.typeRow}>
+              <Text style={[styles.qType, { color: isWeekly ? '#a855f7' : theme.primary }]}>
+                {isWeekly ? 'WEEKLY' : 'DAILY'}
               </Text>
+              {isClaimed && (
+                <View style={styles.claimedBadge}>
+                  <Text style={styles.claimedText}>CLAIMED</Text>
+                </View>
+              )}
+            </View>
+            <Text style={[styles.qTitle, { color: theme.text }, isClaimed && styles.textMuted]}>{quest.title}</Text>
+            <Text style={[styles.qDesc, { color: theme.subText }]}>{quest.description}</Text>
+          </View>
+        </View>
+
+        {!isClaimed && (
+          <View style={styles.progStage}>
+            <View style={styles.progBarOuter}>
+              <View
+                style={[
+                  styles.progBarInner,
+                  { width: `${Math.min(progress, 100)}%` },
+                  isCompleted ? { backgroundColor: accentColor } : { backgroundColor: theme.subText }
+                ]}
+              />
+            </View>
+            <Text style={[styles.progVal, { color: isCompleted ? accentColor : theme.subText }]}>
+              {quest.progress} / {quest.target}
+            </Text>
+          </View>
+        )}
+
+        <View style={styles.footerRow}>
+          <View style={styles.rewardBox}>
+            <Text style={[styles.rewLabel, { color: theme.subText }]}>REWARD</Text>
+            <View style={styles.rewPill}>
+              {quest.reward.xp && <Text style={[styles.rewVal, { color: theme.text }]}>{quest.reward.xp} XP</Text>}
+              {quest.reward.theme && (
+                <Text style={[styles.rewVal, { color: '#a855f7' }]}>
+                  {quest.reward.xp ? ' + ' : ''}NEW THEME
+                </Text>
+              )}
+            </View>
+          </View>
+
+          {isCompleted && !isClaimed ? (
+            <TouchableOpacity
+              style={styles.claimBtn}
+              onPress={() => onClaim(quest.id, isWeekly)}
+            >
+              <LinearGradient
+                colors={[accentColor, `${accentColor}cc`]}
+                style={styles.claimBtnInner}
+              >
+                <Text style={[styles.claimBtnText, { color: theme.background[0] }]}>CLAIM</Text>
+              </LinearGradient>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
+          ) : isClaimed ? (
+            <GameIcons.SparklesIcon size={20} color="#4ade80" />
+          ) : null}
+        </View>
+      </LinearGradient>
+    </View>
+  );
+});
 
-        {/* Quests List */}
-        <ScrollView style={styles.questsScroll} showsVerticalScrollIndicator={false}>
-          {getFilteredQuests().map((quest) => {
-            const completed = isQuestCompleted(quest.id);
-            const progress = getQuestProgress(quest);
-            const IconComponent = GameIcons[quest.icon];
+const QuestsScreen = ({ navigation }) => {
+  const { user } = useAuth();
+  const [dailyQuests, setDailyQuests] = useState([]);
+  const [weeklyQuests, setWeeklyQuests] = useState([]);
+  const [activeTab, setActiveTab] = useState('Daily');
+  const { theme: currentTheme } = useAppTheme();
 
-            return (
-              <View key={quest.id} style={styles.questCard}>
-                <LinearGradient
-                  colors={
-                    completed
-                      ? ['rgba(74, 222, 128, 0.15)', 'rgba(74, 222, 128, 0.05)']
-                      : ['rgba(255, 255, 255, 0.08)', 'rgba(255, 255, 255, 0.02)']
-                  }
-                  style={styles.questGradient}
-                >
-                  <View style={styles.questHeader}>
-                    <View style={styles.questIcon}>
-                      {IconComponent && (
-                        <IconComponent
-                          size={28}
-                          color={completed ? '#4ade80' : '#22d3ee'}
-                        />
-                      )}
-                    </View>
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
 
-                    <View style={styles.questInfo}>
-                      <Text style={styles.questTitle}>{quest.title}</Text>
-                      <Text style={styles.questDescription}>{quest.description}</Text>
-                    </View>
+  useEffect(() => {
+    loadQuests();
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+      Animated.spring(slideAnim, { toValue: 0, tension: 35, friction: 8, useNativeDriver: true }),
+    ]).start();
+  }, []);
 
-                    {completed && (
-                      <View style={styles.completedBadge}>
-                        <Text style={styles.completedText}>✓</Text>
-                      </View>
-                    )}
-                  </View>
+  const loadQuests = async () => {
+    const [daily, weekly] = await Promise.all([
+      QuestService.getDailyQuests(),
+      QuestService.getWeeklyQuests()
+    ]);
+    setDailyQuests(daily);
+    setWeeklyQuests(weekly);
+  };
 
-                  {/* Progress Bar */}
-                  {!completed && (
-                    <View style={styles.progressContainer}>
-                      <View style={styles.progressBar}>
-                        <View
-                          style={[
-                            styles.progressFill,
-                            {
-                              width: `${progress}%`,
-                              backgroundColor: '#22d3ee',
-                            },
-                          ]}
-                        />
-                      </View>
-                      <Text style={styles.progressText}>{Math.round(progress)}%</Text>
-                    </View>
-                  )}
+  const handleClaim = async (questId, isWeekly) => {
+    const reward = await QuestService.claimReward(questId, isWeekly);
+    if (reward) {
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
 
-                  {/* Reward */}
-                  <View style={styles.rewardContainer}>
-                    <Text style={styles.rewardLabel}>Reward:</Text>
-                    <Text style={styles.rewardText}>{quest.reward}</Text>
-                  </View>
-                </LinearGradient>
-              </View>
-            );
-          })}
-        </ScrollView>
+      // Update local UI
+      await loadQuests();
+
+      // Sync to cloud immediately so rewards are saved globally
+      if (user && !user.isGuest) {
+        StorageService.syncWithCloud(user).catch(e => console.log('Reward sync failed:', e));
+      }
+    }
+  };
+
+
+  const renderHeader = () => (
+    <View style={styles.header}>
+      <TouchableOpacity
+        style={[styles.backBtn, { backgroundColor: `${currentTheme.text}10`, borderColor: `${currentTheme.text}20` }]}
+        onPress={() => navigation.goBack()}
+      >
+        <GameIcons.ChevronLeftIcon size={24} color={currentTheme.text} />
+      </TouchableOpacity>
+      <View style={styles.headerTitleBox}>
+        <Text style={[styles.headerSubtitle, { color: currentTheme.primary }]}>AVAILABLE</Text>
+        <Text style={[styles.headerTitle, { color: currentTheme.text }]}>MISSIONS</Text>
       </View>
+      <View style={{ width: 44 }} />
+    </View>
+  );
+
+  const renderTabs = () => (
+    <View style={styles.tabContainer}>
+      {['Daily', 'Weekly'].map(tab => (
+        <TouchableOpacity
+          key={tab}
+          onPress={() => setActiveTab(tab)}
+          style={[
+            styles.tab,
+            { backgroundColor: `${currentTheme.text}05`, borderColor: `${currentTheme.text}10` },
+            activeTab === tab && { backgroundColor: `${currentTheme.primary}20`, borderColor: `${currentTheme.primary}40` }
+          ]}
+        >
+          <Text style={[
+            styles.tabText,
+            { color: currentTheme.subText },
+            activeTab === tab && { color: currentTheme.primary }
+          ]}>
+            {tab.toUpperCase()}
+          </Text>
+          {activeTab === tab && <View style={[styles.tabDot, { backgroundColor: currentTheme.primary }]} />}
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+
+  return (
+    <ThemeBackground theme={currentTheme}>
+      <StatusBar barStyle="light-content" />
+      <Animated.View style={[styles.container, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+        {renderHeader()}
+        {renderTabs()}
+
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: currentTheme.text }]}>
+              {activeTab === 'Daily' ? 'DAILY OBJECTIVES' : 'WEEKLY CHALLENGES'}
+            </Text>
+            <View style={styles.timerBox}>
+              <GameIcons.TimerIcon size={12} color={currentTheme.subText} />
+              <Text style={[styles.timerText, { color: currentTheme.subText }]}>
+                {activeTab === 'Daily' ? 'Resets in 12h' : 'Resets in 4d'}
+              </Text>
+            </View>
+          </View>
+
+          {(activeTab === 'Daily' ? dailyQuests : weeklyQuests).map(quest => (
+            <QuestCard
+              key={quest.id}
+              quest={quest}
+              isWeekly={activeTab === 'Weekly'}
+              onClaim={handleClaim}
+              theme={currentTheme}
+            />
+          ))}
+
+          {activeTab === 'Weekly' && (
+            <View style={styles.weeklyExtra}>
+              <LinearGradient
+                colors={['rgba(168, 85, 247, 0.1)', 'rgba(124, 58, 237, 0.05)']}
+                style={styles.extraBox}
+              >
+                <GameIcons.SparklesIcon size={32} color="#a855f7" />
+                <Text style={styles.extraTitle}>WEEKLY JACKPOT</Text>
+                <Text style={styles.extraDesc}>Complete all weekly missions to unlock the exclusive "COSMIC MIST" theme!</Text>
+              </LinearGradient>
+            </View>
+          )}
+        </ScrollView>
+      </Animated.View>
     </ThemeBackground>
   );
 };
@@ -165,137 +259,256 @@ const QuestsScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: 60,
+    paddingTop: height * 0.08,
   },
-  title: {
-    fontSize: 28,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    marginBottom: 24,
+  },
+  backBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  headerTitleBox: {
+    alignItems: 'center',
+  },
+  headerSubtitle: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 4,
+  },
+  headerTitle: {
+    fontSize: 24,
     fontWeight: '900',
     color: '#fff',
-    textAlign: 'center',
-    marginBottom: 20,
-    paddingHorizontal: 20,
-    letterSpacing: 0.5,
+    letterSpacing: 1,
   },
-  categoryScroll: {
-    maxHeight: 50,
-    marginBottom: 20,
+  tabContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 24,
+    marginBottom: 24,
+    gap: 16,
   },
-  categoryContainer: {
-    paddingHorizontal: 20,
-    gap: 8,
-  },
-  categoryButton: {
-    paddingHorizontal: 20,
+  tab: {
     paddingVertical: 10,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    marginRight: 8,
-  },
-  categoryButtonActive: {
-    backgroundColor: '#22d3ee',
-  },
-  categoryText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#94a3b8',
-  },
-  categoryTextActive: {
-    color: '#0f172a',
-  },
-  questsScroll: {
-    flex: 1,
     paddingHorizontal: 20,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 100,
+  },
+  activeTab: {
+    backgroundColor: 'rgba(34, 211, 238, 0.1)',
+    borderColor: 'rgba(34, 211, 238, 0.2)',
+  },
+  tabText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#64748b',
+    letterSpacing: 1,
+  },
+  activeTabText: {
+  },
+  tabDot: {
+    position: 'absolute',
+    bottom: 6,
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+  },
+  scrollContent: {
+    paddingHorizontal: 24,
+    paddingBottom: 40,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#fff',
+    letterSpacing: 1.5,
+  },
+  timerBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  timerText: {
+    fontSize: 10,
+    color: '#64748b',
+    fontWeight: '700',
   },
   questCard: {
     marginBottom: 16,
-    borderRadius: 20,
+    borderRadius: 24,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderColor: 'rgba(255,255,255,0.08)',
   },
-  questGradient: {
+  questCardReady: {
+    borderColor: 'rgba(34, 211, 238, 0.3)',
+  },
+  questInner: {
     padding: 20,
   },
-  questHeader: {
+  questTop: {
     flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
+    gap: 16,
+    marginBottom: 20,
   },
-  questIcon: {
+  iconBox: {
     width: 48,
     height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.05)',
     justifyContent: 'center',
-    marginRight: 12,
+    alignItems: 'center',
   },
-  questInfo: {
+  infoBox: {
     flex: 1,
   },
-  questTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+  typeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  qType: {
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  typeDaily: { color: '#64748b' },
+  typeWeekly: { color: '#a855f7' },
+  qTitle: {
+    fontSize: 16,
+    fontWeight: '800',
     color: '#fff',
     marginBottom: 4,
   },
-  questDescription: {
-    fontSize: 13,
+  qDesc: {
+    fontSize: 12,
     color: '#94a3b8',
-    lineHeight: 18,
+    lineHeight: 16,
   },
-  completedBadge: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#4ade80',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  completedText: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: '#fff',
-  },
-  progressContainer: {
+  progStage: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    gap: 12,
+    marginBottom: 16,
   },
-  progressBar: {
+  progBarOuter: {
     flex: 1,
-    height: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 4,
+    height: 6,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 3,
     overflow: 'hidden',
-    marginRight: 12,
   },
-  progressFill: {
+  progBarInner: {
     height: '100%',
-    borderRadius: 4,
+    backgroundColor: '#334155',
   },
-  progressText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#94a3b8',
+  progVal: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#64748b',
     minWidth: 40,
     textAlign: 'right',
   },
-  rewardContainer: {
+  footerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.05)',
+    paddingTop: 16,
+  },
+  rewardBox: {
+    gap: 2,
+  },
+  rewLabel: {
+    fontSize: 8,
+    fontWeight: '900',
+    color: '#64748b',
+    letterSpacing: 1,
+  },
+  rewPill: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  rewardLabel: {
-    fontSize: 13,
+  rewVal: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#fff',
+  },
+  claimBtn: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  claimBtnInner: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  claimBtnText: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#0f172a',
+  },
+  claimedBadge: {
+    backgroundColor: 'rgba(74, 222, 128, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  claimedText: {
+    fontSize: 8,
+    fontWeight: '900',
+    color: '#4ade80',
+  },
+  textMuted: {
     color: '#64748b',
-    marginRight: 8,
-    fontWeight: '600',
+    textDecorationLine: 'line-through',
   },
-  rewardText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#22d3ee',
+  weeklyExtra: {
+    marginTop: 20,
+    borderRadius: 24,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(168, 85, 247, 0.2)',
   },
+  extraBox: {
+    padding: 24,
+    alignItems: 'center',
+    gap: 12,
+  },
+  extraTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#a855f7',
+    letterSpacing: 2,
+  },
+  extraDesc: {
+    fontSize: 12,
+    color: '#94a3b8',
+    textAlign: 'center',
+    lineHeight: 18,
+  }
 });
 
 export default QuestsScreen;

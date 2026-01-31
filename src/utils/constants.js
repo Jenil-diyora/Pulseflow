@@ -1,5 +1,5 @@
 export const GAME_CONSTANTS = {
-  TARGET_RADIUS: 120,
+  TARGET_RADIUS: 145,
 
   // NEW: Human-centered difficulty parameters
   // These replace the old linear speed scaling
@@ -34,6 +34,16 @@ export const STORAGE_KEYS = {
   UNLOCKED_THEMES: '@pulse_tap_unlocked_themes',
   SETTINGS: '@pulse_tap_settings',
   STATS: '@pulse_tap_stats',
+  USER_NAME: '@pulse_tap_user_name',
+  USER_LEVEL: '@pulse_tap_user_level',
+  USER_XP: '@pulse_tap_user_xp',
+  USER_LABELS: '@pulse_tap_user_labels',
+  SELECTED_THEME: '@pulse_tap_selected_theme',
+  AUTO_THEME: '@pulse_tap_auto_theme',
+  DAILY_QUESTS_DATA: '@pulse_tap_daily_quests_data',
+  WEEKLY_QUESTS_DATA: '@pulse_tap_weekly_quests_data',
+  PREMIUM_STATUS: '@pulse_tap_premium_status',
+  AD_FREE_EXPIRY: '@pulse_tap_ad_free_expiry',
 };
 
 // Shape types
@@ -102,3 +112,12 @@ export const getReflexRating = (score, accuracy = 0) => {
     message: scoreRating.message + bonusMessage,
   };
 };
+
+export const LAYOUT = {
+  PADDING: 24,
+  RADIUS: 24,
+  GAP: 16,
+  GUTTER: 12,
+  INNER_RADIUS: 18,
+};
+
